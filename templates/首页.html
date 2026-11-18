@@ -1,37 +1,106 @@
-{% extends '基础.html' %}
+{% extends "基础.html" %}
 {% from '组件.html' import card, pagination %}
 {% block content %}
-<section class="hero" aria-labelledby="hero-title">
-  <div class="hero-copy">
-    <div class="eyebrow caption-3"><span class="green-dot"></span> {{ school_name }}</div>
-    <h1 id="hero-title" class="heading-1">丢失的小事，<br>我们一起找回来。</h1>
-    <p class="body-3 hero-description">从弘毅楼到食堂，从操场到宿舍。<br>留下一条线索，让物品早一点回到主人身边。</p>
-    <div class="hero-bottom"><a class="button button-md" href="{{ url_for('publish') }}">发布一条信息 <span aria-hidden="true">↗</span></a><span class="caption-2">先核对，再认领</span></div>
-  </div>
-  <div class="hero-art"><img src="{{ url_for('static', filename='校园物件.svg') }}" alt="钥匙、校园卡和手提包组成的校园失物招领插画" width="560" height="400"><span class="art-caption caption-1">每一份善意，都有回响。</span></div>
-</section>
-<section class="stats-strip" aria-label="站点信息统计">
-  <div><span class="stat-value heading-5">{{ counts.get('lost', 0) }}</span><span class="caption-2">正在寻找主人线索</span></div>
-  <div><span class="stat-value heading-5">{{ counts.get('found', 0) }}</span><span class="caption-2">拾到物品等待认领</span></div>
-  <div><span class="stat-value heading-5">{{ returned }}</span><span class="caption-2">已标记找回</span></div>
-  <p class="caption-2 stats-note">{{ '当前为演示数据' if demo_mode else '数字来自已审核的信息' }}<br>你的一条线索，也许正被需要</p>
-</section>
-<section id="items" class="feed-section" aria-labelledby="feed-title">
-  <div class="section-heading"><div><p class="eyebrow caption-3">校园互助 · 从这里开始</p><h2 id="feed-title" class="heading-4">失物广场</h2></div><p class="caption-2">{{ page.total }} 条符合条件的信息</p></div>
-  <form method="get" action="{{ url_for('index') }}#items" class="search-panel" role="search">
-    <div class="search-row"><label class="search-field"><span class="sr-only">搜索物品或地点</span><span class="search-mark" aria-hidden="true"></span><input type="search" name="q" value="{{ q }}" maxlength="60" placeholder="试试搜：钥匙、校园卡、弘毅楼…"></label><button class="button button-md" type="submit">搜索物品</button></div>
-    <div class="filter-row">
-      <label><span class="caption-2">信息类型</span><select name="kind" aria-label="信息类型"><option value="">全部类型</option value="lost" {{ 'selected' if kind == 'lost' }}>寻物启事</option><option value="found" {{ 'selected' if kind == 'found' }}>拾物招领</option></select></label>
-      <label><span class="caption-2">物品分类</span><select name="category" aria-label="物品分类"><option value="">全部物品</option>{% for c in categories %}<option {{ 'selected' if category == c }}>{{ c }}</option>{% endfor %}</select></label>
-      <label><span class="caption-2">校园地点</span><select name="location" aria-label="校园地点"><option value="">全部地点</option>{% for place in campus_locations %}<option {{ 'selected' if location == place }}>{{ place }}</option>{% endfor %}</select></label>
-      <label><span class="caption-2">当前状态</span><select name="status" aria-label="当前状态"><option value="open" {{ 'selected' if status == 'open' }}>仍在寻找</option><option value="closed" {{ 'selected' if status == 'closed' }}>已经找回</option><option value="all" {{ 'selected' if status == 'all' }}>全部状态</option></select></label>
-      <a class="reset-link caption-1" href="{{ url_for('index') }}#items">清除筛选</a>
+  <section class="hero" aria-labelledby="hero-title">
+    <div class="hero-copy">
+      <div class="eyebrow caption-3"><span class="green-dot"></span> {{ school_name }}</div>
+      <h1 id="hero-title" class="heading-1">
+        丢失的小事，
+        <br>
+        我们一起找回来。
+      </h1>
+      <p class="body-3 hero-description">
+        从弘毅楼到食堂，从操场到宿舍。
+        <br>
+        留下一条线索，让物品早一点回到主人身边。
+      </p>
+      <div class="hero-bottom"><a class="button button-md" href="{{ url_for('publish') }}">发布一条信息 <span aria-hidden="true">↗</span></a><span class="caption-2">先核对，再认领</span></div>
     </div>
-  </form>
-  {% if page.items %}<div class="item-grid">{% for item in page.items %}{{ card(item) }}{% endfor %}</div>{% else %}
-    <div class="empty-state"><span class="empty-symbol" aria-hidden="true">⌕</span><h3 class="heading-5">{{ '还没有找到相关信息' if q or category or location or kind or status != 'open' else '第一条校园线索，等你留下' }}</h3><p class="body-6">{{ '换个关键词或地点试试，也可以发布自己的信息。' if q or category or location or kind or status != 'open' else '遗失了物品，或捡到一份小小的牵挂？把信息留在这里。' }}</p><a class="button button-secondary button-md" href="{{ url_for('publish') }}">发布信息</a></div>
-  {% endif %}
-  {{ pagination(page, 'index', dict(q=q, kind=kind, category=category, location=location, status=status)) }}
+    <div class="hero-art">
+      <img src="{{ url_for('static', filename='校园物件.svg') }}"
+           alt="钥匙、校园卡和手提包组成的校园失物招领插画"
+           width="560"
+           height="400"><span class="art-caption caption-1">每一份善意，都有回响。</span>
+    </div>
+  </section>
+  <section class="stats-strip" aria-label="站点信息统计">
+    <div><span class="stat-value heading-5">{{ counts.get('lost', 0) }}</span><span class="caption-2">正在寻找主人线索</span></div>
+    <div><span class="stat-value heading-5">{{ counts.get('found', 0) }}</span><span class="caption-2">拾到物品等待认领</span></div>
+    <div><span class="stat-value heading-5">{{ returned }}</span><span class="caption-2">已标记找回</span></div>
+    <p class="caption-2 stats-note">
+      {{ '当前为演示数据' if demo_mode else '数字来自已审核的信息' }}
+      <br>
+      你的一条线索，也许正被需要
+    </p>
+  </section>
+  <section id="items" class="feed-section" aria-labelledby="feed-title">
+    <div class="section-heading">
+      <div>
+        <p class="eyebrow caption-3">校园互助 · 从这里开始</p>
+        <h2 id="feed-title" class="heading-4">失物广场</h2>
+      </div>
+      <p class="caption-2">{{ page.total }} 条符合条件的信息</p>
+    </div>
+    <form method="get"
+          action="{{ url_for('index') }}#items"
+          class="search-panel"
+          role="search">
+      <div class="search-row">
+        <label class="search-field">
+          <span class="sr-only">搜索物品或地点</span><span class="search-mark" aria-hidden="true"></span><input type="search"
+                                                                                                         name="q"
+                                                                                                         value="{{ q }}"
+                                                                                                         maxlength="60"
+                                                                                                         placeholder="试试搜：钥匙、校园卡、弘毅楼…"></label><button class="button button-md" type="submit">搜索物品</button>
+      </div>
+      <div class="filter-row">
+        <label>
+          <span class="caption-2">信息类型</span><select name="kind" aria-label="信息类型">
+            <option value="">全部类型</option value="lost" {{ 'selected' if kind == 'lost' }}>
+              寻物启事
+            </option>
+            <option value="found" {{ 'selected' if kind == 'found' }}>拾物招领</option>
+          </select>
+        </label>
+        <label><span class="caption-2">物品分类</span><select name="category" aria-label="物品分类"><option value="">全部物品</option>{% for c in categories %}<option {{ 'selected' if category == c }}>{{ c }}</option>{% endfor %}</select></label>
+        <label><span class="caption-2">校园地点</span><select name="location" aria-label="校园地点"><option value="">全部地点</option>{% for place in campus_locations %}<option {{ 'selected' if location == place }}>{{ place }}</option>{% endfor %}</select></label>
+        <label>
+          <span class="caption-2">当前状态</span><select name="status" aria-label="当前状态">
+            <option value="open" {{ 'selected' if status == 'open' }}>仍在寻找</option>
+            <option value="closed" {{ 'selected' if status == 'closed' }}>已经找回</option>
+            <option value="all" {{ 'selected' if status == 'all' }}>全部状态</option>
+          </select>
+        </label>
+        <a class="reset-link caption-1" href="{{ url_for('index') }}#items">清除筛选</a>
+      </div>
+    </form>
+    {% if page.items %}<div class="item-grid">{% for item in page.items %}{{ card(item) }}{% endfor %}</div>{% else %}
+    <div class="empty-state">
+      <span class="empty-symbol" aria-hidden="true">⌕</span>
+      <h3 class="heading-5">{{ '还没有找到相关信息' if q or category or location or kind or status != 'open' else '第一条校园线索，等你留下' }}</h3>
+      <p class="body-6">{{ '换个关键词或地点试试，也可以发布自己的信息。' if q or category or location or kind or status != 'open' else '遗失了物品，或捡到一份小小的牵挂？把信息留在这里。' }}</p>
+      <a class="button button-secondary button-md"
+         href="{{ url_for('publish') }}">发布信息</a>
+    </div>
+{% endif %}
+{{ pagination(page, 'index', dict(q=q, kind=kind, category=category, location=location, status=status)) }}
 </section>
-<section class="how-section" aria-labelledby="how-title"><div><p class="eyebrow caption-3">让物品回家的三步</p><h2 id="how-title" class="heading-4">留线索，核对，再交还。</h2></div><div class="how-grid"><article><span class="step-number title-3">01</span><h3 class="title-2">说清楚在哪里</h3><p class="body-6">选择校园地点，描述时间和外观。照片里记得遮挡证件号码。</p></article><article><span class="step-number title-3">02</span><h3 class="title-2">私下核对细节</h3><p class="body-6">认领说明只对相关人员可见。保留独有特征，帮助辨认真正的主人。</p></article><article><span class="step-number title-3">03</span><h3 class="title-2">约好地点交还</h3><p class="body-6">核对通过后交换联系方式，在校园公共场所交接，完成后标记找回。</p></article></div></section>
+<section class="how-section" aria-labelledby="how-title">
+  <div>
+    <p class="eyebrow caption-3">让物品回家的三步</p>
+    <h2 id="how-title" class="heading-4">留线索，核对，再交还。</h2>
+  </div>
+  <div class="how-grid">
+    <article><span class="step-number title-3">01</span>
+      <h3 class="title-2">说清楚在哪里</h3>
+      <p class="body-6">选择校园地点，描述时间和外观。照片里记得遮挡证件号码。</p>
+    </article><article><span class="step-number title-3">02</span>
+      <h3 class="title-2">私下核对细节</h3>
+      <p class="body-6">认领说明只对相关人员可见。保留独有特征，帮助辨认真正的主人。</p>
+    </article><article><span class="step-number title-3">03</span>
+      <h3 class="title-2">约好地点交还</h3>
+      <p class="body-6">核对通过后交换联系方式，在校园公共场所交接，完成后标记找回。</p>
+    </article>
+  </div>
+</section>
 {% endblock %}

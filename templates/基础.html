@@ -1,46 +1,71 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="zh-CN">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}{{ site_name }}{% endblock %} · 保定职业技术学院</title>
-  <meta name="description" content="保定职业技术学院西校区学生课程项目：发布寻物启事与拾物招领，按校园地点搜索，私下核对认领信息。">
-  <meta name="robots" content="noindex,nofollow">
-  <meta name="theme-color" content="#176b54">
-  <meta property="og:title" content="{{ site_name }}">
-  <meta property="og:description" content="让遗失的物品，重新回到熟悉的人身边。">
-  <meta property="og:image" content="{{ url_for('static', filename='校园物件.svg', _external=True) }}">
-  <link rel="icon" href="{{ url_for('static', filename='站点图标.svg') }}" type="image/svg+xml">
-  <link rel="stylesheet" href="{{ url_for('static', filename='样式.css') }}">
-  <script src="{{ url_for('static', filename='交互.js') }}" defer></script>
-</head>
-<body class="body-3">
-  <a class="skip-link" href="#main">跳转到主要内容</a>
-  {% if demo_mode %}<div class="demo-banner caption-1">本地演示环境 · 示例信息均为虚构，请勿用于真实认领</div>{% endif %}
-  <header class="site-header">
-    <a class="brand" href="{{ url_for('index') }}" aria-label="{{ site_name }}首页">
-      <img src="{{ url_for('static', filename='站点图标.svg') }}" alt="" width="40" height="40">
-      <span><strong class="title-2">{{ site_name }}</strong><span class="caption-5 brand-subtitle">保定职业技术学院 · 西校区</span></span>
-    </a>
-    <nav aria-label="主导航" class="nav-links">
-      <a class="title-4 desktop-link {{ 'current' if request.endpoint == 'index' }}" href="{{ url_for('index') }}" {% if request.endpoint == 'index' %}aria-current="page"{% endif %}>失物广场</a>
-      {% if g.user %}
-        <a class="title-4 {{ 'current' if request.endpoint == 'dashboard' }}" href="{{ url_for('dashboard') }}" {% if request.endpoint == 'dashboard' %}aria-current="page"{% endif %}>我的记录</a>
-        {% if g.user.is_admin %}<a class="title-4" href="{{ url_for('admin') }}">管理后台</a>{% endif %}
-        <form method="post" action="{{ url_for('logout') }}" class="inline-form desktop-link"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="text-button button-sm" type="submit">退出</button></form>
-      {% else %}
-        <a class="title-4" href="{{ url_for('login') }}">登录</a>
-      {% endif %}
-      <a class="button button-sm" href="{{ url_for('publish') }}">＋ 发布信息</a>
-    </nav>
-  </header>
-  <main id="main" class="page-shell">
-    {% with messages = get_flashed_messages(with_categories=true) %}{% if messages %}<div class="flash-stack" aria-live="polite">{% for category, message in messages %}<div class="notice {{ category }} body-6">{{ message }}</div>{% endfor %}</div>{% endif %}{% endwith %}
-    {% block content %}{% endblock %}
-  </main>
-  <footer class="site-footer caption-2">
-    <div><strong class="title-4">{{ site_name }}</strong><p>学生课程项目 · 非学校官方平台</p></div>
-    <nav aria-label="页脚导航"><a href="{{ url_for('about', page='help') }}">使用帮助</a><a href="{{ url_for('about', page='rules') }}">使用规则</a><a href="{{ url_for('about', page='privacy') }}">隐私说明</a></nav>
-  </footer>
-</body>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}{{ site_name }}{% endblock %} · 保定职业技术学院</title>
+    <meta name="description"
+          content="保定职业技术学院西校区学生课程项目：发布寻物启事与拾物招领，按校园地点搜索，私下核对认领信息。">
+    <meta name="robots" content="noindex,nofollow">
+    <meta name="theme-color" content="#176b54">
+    <meta property="og:title" content="{{ site_name }}">
+    <meta property="og:description" content="让遗失的物品，重新回到熟悉的人身边。">
+    <meta property="og:image"
+          content="{{ url_for('static', filename='校园物件.svg', _external=True) }}">
+    <link rel="icon"
+          href="{{ url_for('static', filename='站点图标.svg') }}"
+          type="image/svg+xml">
+    <link rel="stylesheet" href="{{ url_for('static', filename='样式.css') }}">
+    <script src="{{ url_for('static', filename='交互.js') }}" defer></script>
+  </head>
+  <body class="body-3">
+    <a class="skip-link" href="#main">跳转到主要内容</a>
+    {% if demo_mode %}<div class="demo-banner caption-1">本地演示环境 · 示例信息均为虚构，请勿用于真实认领</div>{% endif %}
+    <header class="site-header">
+      <a class="brand"
+         href="{{ url_for('index') }}"
+         aria-label="{{ site_name }}首页">
+        <img src="{{ url_for('static', filename='站点图标.svg') }}"
+             alt=""
+             width="40"
+             height="40">
+        <span><strong class="title-2">{{ site_name }}</strong><span class="caption-5 brand-subtitle">保定职业技术学院 · 西校区</span></span>
+      </a>
+      <nav aria-label="主导航" class="nav-links">
+        <a class="title-4 desktop-link {{ 'current' if request.endpoint == 'index' }}"
+           href="{{ url_for('index') }}"
+           {% if request.endpoint == 'index' %}aria-current="page"{% endif %}>失物广场</a>
+        {% if g.user %}
+          <a class="title-4 {{ 'current' if request.endpoint == 'dashboard' }}"
+             href="{{ url_for('dashboard') }}"
+             {% if request.endpoint == 'dashboard' %}aria-current="page"{% endif %}>我的记录</a>
+          {% if g.user.is_admin %}<a class="title-4" href="{{ url_for('admin') }}">管理后台</a>{% endif %}
+          <form method="post"
+                action="{{ url_for('logout') }}"
+                class="inline-form desktop-link">
+            <input type="hidden"
+                   name="csrf_token"
+                   value="{{ csrf_token() }}"><button class="text-button button-sm"
+                                                      type="submit">退出</button>
+          </form>
+        {% else %}
+          <a class="title-4" href="{{ url_for('login') }}">登录</a>
+        {% endif %}
+        <a class="button button-sm" href="{{ url_for('publish') }}">＋ 发布信息</a>
+      </nav>
+    </header>
+    <main id="main" class="page-shell">
+      {% with messages = get_flashed_messages(with_categories=true) %}{% if messages %}<div class="flash-stack" aria-live="polite">{% for category, message in messages %}<div class="notice {{ category }} body-6">{{ message }}</div>{% endfor %}</div>{% endif %}{% endwith %}
+      {% block content %}{% endblock %}
+    </main>
+    <footer class="site-footer caption-2">
+      <div>
+        <strong class="title-4">{{ site_name }}</strong>
+        <p>学生课程项目 · 非学校官方平台</p>
+      </div>
+      <nav aria-label="页脚导航">
+        <a href="{{ url_for('about', page='help') }}">使用帮助</a><a href="{{ url_for('about', page='rules') }}">使用规则</a><a href="{{ url_for('about', page='privacy') }}">隐私说明</a>
+      </nav>
+    </footer>
+  </body>
 </html>
