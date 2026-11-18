@@ -1,4 +1,4 @@
-param([Parameter(Mandatory=$true)][string]$说明)
+﻿param([Parameter(Mandatory=$true)][string]$说明)
 $ErrorActionPreference = 'Stop'
 Set-Location -LiteralPath $PSScriptRoot
 git add --all
