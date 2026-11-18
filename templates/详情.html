@@ -2,7 +2,7 @@
 {% from '认领操作.html' import actions with context %}
 {% block title %}{{ item.title }}{% endblock %}
 {% block content %}
-<a class="back-link caption-1" href="{{ url_for('index') }}">← 返回失物广场</a>
+<a class="back-link caption-1" href="{{ url_for('index', campus=item.campus) }}">← 返回失物广场</a>
 {% if item.review != 'approved' %}<p class="notice info body-6">{{ review_names[item.review] }}，当前信息未公开。{{ item.review_note }}</p>{% endif %}
 <section class="detail-layout">
   <article class="form-panel detail-main">
@@ -10,6 +10,7 @@
     <h1 class="heading-3">{{ item.title }}</h1><p class="caption-2 muted">{{ item.owner.username }} · {{ item.created_at|beijing }} 发布</p>
     {% if item.image_name %}<img class="detail-photo" src="{{ url_for('item_image', item_id=item.id) }}" alt="{{ item.title }}的物品照片" width="1000" height="700">{% endif %}
     <dl class="item-facts">
+      <div><dt class="caption-2 muted">所属校区</dt><dd class="title-3">{{ item.campus }}</dd></div>
       <div><dt class="caption-2 muted">校园地点</dt><dd class="title-3">{{ item.location }}</dd></div>
       <div><dt class="caption-2 muted">{{ '遗失日期' if item.kind == 'lost' else '拾取日期' }}</dt><dd class="title-3">{{ item.happened_on.isoformat() }}</dd></div>
       {% if item.location_detail %}<div><dt class="caption-2 muted">位置补充</dt><dd class="body-3">{{ item.location_detail }}</dd></div>{% endif %}

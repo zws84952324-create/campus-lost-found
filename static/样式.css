@@ -2051,3 +2051,10 @@ a:active {
   .campus-photo figcaption { font-size: 12px; line-height: 16px; }
   .pagination { gap: 12px; flex-wrap: wrap; }
 }
+
+.campus-switch { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
+.campus-illustration { margin: 0; min-width: 0; }
+@media(max-width:600px) {
+  .campus-switch { gap: 8px; }
+  .campus-switch > .caption-2 { flex-basis: 100%; }
+}

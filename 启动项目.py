@@ -3,7 +3,7 @@ import argparse
 import threading
 import webbrowser
 
-from app import create_app, db
+from app import create_app, initialize_database
 
 
 def main():
@@ -14,7 +14,7 @@ def main():
     config = {'SESSION_COOKIE_SECURE':False, 'TRUSTED_HOSTS':['localhost','127.0.0.1']}
     app = create_app(config)
     with app.app_context():
-        db.create_all()
+        initialize_database()
     address = f'http://127.0.0.1:{args.port}'
     print(f'本地地址：{address}\n按 Ctrl+C 停止。请先创建管理员，审核同学提交的信息。', flush=True)
     if not args.no_browser:

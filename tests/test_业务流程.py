@@ -58,7 +58,7 @@ def post_item(app, review='approved', **overrides):
 
 
 def valid_form():
-    return dict(kind='found', title='带蓝色挂件的一串钥匙', category='钥匙', location='弘毅楼',
+    return dict(campus='西校区', kind='found', title='带蓝色挂件的一串钥匙', category='钥匙', location='弘毅楼',
                 location_detail='一楼入口', happened_on='2026-11-10',
                 description='在入口捡到钥匙，请说明钥匙数量与挂件背面的特征。', contact='微信：owner-private-contact')
 
@@ -70,7 +70,7 @@ def test_public_pages_and_campus_locations(app):
         assert response.status_code == 200
     html = client.get('/').get_data(as_text=True)
     assert '保定职业技术学院（西校区）' in html
-    assert all(place in html for place in app.config['CAMPUS_LOCATIONS'])
+    assert all(place in html for place in app.config['CAMPUSES']['西校区'])
     assert client.get('/不存在').status_code == 404
     assert client.get('/publish').status_code == 302
     assert client_as(app, '其他同学').get('/admin').status_code == 403

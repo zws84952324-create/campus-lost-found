@@ -90,3 +90,20 @@ window.addEventListener('pageshow', () => {
     button.removeAttribute('aria-busy');
   });
 });
+
+// 校区变化时重建地点列表；只改地点选项，保留描述与已选照片。
+const campusSelect = document.querySelector('[data-campus-select]');
+const locationSelect = document.querySelector('[data-campus-location]');
+if (campusSelect && locationSelect) {
+  const locations = JSON.parse(campusSelect.dataset.campusLocations);
+  const updateLocations = (keepSelection) => {
+    const previous = keepSelection ? locationSelect.value : '';
+    locationSelect.replaceChildren(new Option('请选择地点', ''));
+    (locations[campusSelect.value] || []).forEach(place => {
+      locationSelect.add(new Option(place, place, false, place === previous));
+    });
+  };
+  updateLocations(true);
+  campusSelect.addEventListener('change', () => updateLocations(false));
+  window.addEventListener('pageshow', () => updateLocations(true));
+}

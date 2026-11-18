@@ -1,32 +1,44 @@
 {% extends "基础.html" %}
 {% from '组件.html' import card, pagination %}
 {% block content %}
+  <nav class="campus-switch" aria-label="切换校区">
+    <span class="title-4">选择校区</span>
+    {% for name in campuses %}<a class="button button-sm {{ 'button-secondary' if name != current_campus }}" href="{{ url_for('index', campus=name) }}" {% if name == current_campus %}aria-current="page"{% endif %}>{{ name }}</a>{% endfor %}
+    <span class="caption-2 muted">当前显示{{ current_campus }}的信息</span>
+  </nav>
   <section class="hero" aria-labelledby="hero-title">
     <div class="hero-copy">
-      <div class="eyebrow caption-3"><span class="green-dot"></span> {{ school_name }}</div>
+      <div class="eyebrow caption-3"><span class="green-dot"></span> {{ school_name }}（{{ current_campus }}）</div>
       <h1 id="hero-title" class="heading-1">
         丢失的小事，
         <br>
         我们一起找回来。
       </h1>
       <p class="body-3 hero-description">
-        从弘毅楼到食堂，从操场到宿舍。
+        从{{ '弘毅楼' if current_campus == '西校区' else '明德楼' }}到食堂，从操场到宿舍。
         <br>
         留下一条线索，让物品早一点回到主人身边。
       </p>
       <div class="hero-bottom"><a class="button button-md" href="{{ url_for('publish') }}">发布一条信息 <span aria-hidden="true">↗</span></a><span class="caption-2">先核对，再认领</span></div>
     </div>
+    {% if current_campus == '西校区' %}
     <figure class="campus-photo">
       <img src="{{ url_for('static', filename='西校区正门.webp') }}" alt="保定职业技术学院西校区正门，右侧门柱上刻有学校名称" width="1190" height="543" fetchpriority="high">
       <figcaption class="caption-2"><span>保定职业技术学院 · 西校区</span><span>熟悉的校园，彼此的照应。</span></figcaption>
     </figure>
+    {% else %}
+    <figure class="hero-art campus-illustration">
+      <img src="{{ url_for('static', filename='校园物件.svg') }}" alt="钥匙、校园卡和手提包组成的校园失物招领插画" width="560" height="400">
+      <figcaption class="art-caption caption-2">东校区 · 让每一条线索找到需要的人</figcaption>
+    </figure>
+    {% endif %}
   </section>
   <section class="stats-strip" aria-label="站点信息统计">
     <div><span class="stat-value heading-5">{{ counts.get('lost', 0) }}</span><span class="caption-2">正在寻找主人线索</span></div>
     <div><span class="stat-value heading-5">{{ counts.get('found', 0) }}</span><span class="caption-2">拾到物品等待认领</span></div>
     <div><span class="stat-value heading-5">{{ returned }}</span><span class="caption-2">已标记找回</span></div>
     <p class="caption-2 stats-note">
-      数字来自已审核的信息
+      数字来自{{ current_campus }}已审核的信息
       <br>
       你的一条线索，也许正被需要
     </p>
@@ -35,7 +47,7 @@
     <div class="section-heading">
       <div>
         <p class="eyebrow caption-3">校园互助 · 从这里开始</p>
-        <h2 id="feed-title" class="heading-4">失物广场</h2>
+        <h2 id="feed-title" class="heading-4">{{ current_campus }}失物广场</h2>
       </div>
       <p class="caption-2">{{ page.total }} 条符合条件的信息</p>
     </div>
@@ -43,13 +55,14 @@
           action="{{ url_for('index') }}#items"
           class="search-panel"
           role="search">
+      <input type="hidden" name="campus" value="{{ current_campus }}">
       <div class="search-row">
         <label class="search-field">
           <span class="sr-only">搜索物品或地点</span><span class="search-mark" aria-hidden="true"></span><input type="search"
                                                                                                          name="q"
                                                                                                          value="{{ q }}"
                                                                                                          maxlength="60"
-                                                                                                         placeholder="试试搜：钥匙、校园卡、弘毅楼…"></label><button class="button button-md" type="submit">搜索物品</button>
+                                                                                                         placeholder="试试搜：钥匙、校园卡、{{ '弘毅楼' if current_campus == '西校区' else '明德楼' }}…"></label><button class="button button-md" type="submit">搜索物品</button>
       </div>
       <div class="filter-row">
         <label>

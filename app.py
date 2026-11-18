@@ -22,7 +22,7 @@ from flask import (Flask, abort, flash, g, redirect, render_template, request,
 from flask_sqlalchemy import SQLAlchemy
 from flask_wtf.csrf import CSRFError, CSRFProtect
 from PIL import Image, ImageOps, UnidentifiedImageError
-from sqlalchemy import event, or_, select, update
+from sqlalchemy import event, inspect, or_, select, update
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import joinedload
@@ -72,6 +72,7 @@ class Item(db.Model):
     kind = db.Column(db.String(10), nullable=False)
     title = db.Column(db.String(60), nullable=False)
     category = db.Column(db.String(20), nullable=False)
+    campus = db.Column(db.String(20), nullable=False, default='西校区', server_default='西校区')
     location = db.Column(db.String(60), nullable=False)
     location_detail = db.Column(db.String(100), nullable=False, default='')
     happened_on = db.Column(db.Date, nullable=False)
@@ -84,7 +85,8 @@ class Item(db.Model):
     # 兼容旧版数据库；旧演示记录永不进入真实认领页面。
     is_demo = db.Column(db.Boolean, nullable=False, default=False)
     created_at = db.Column(db.DateTime, nullable=False, default=now, index=True)
-    __table_args__ = (db.Index('ix_item_feed', 'review', 'resolved', 'kind', 'created_at'),)
+    __table_args__ = (db.Index('ix_item_feed', 'review', 'resolved', 'kind', 'created_at'),
+                     db.Index('ix_item_campus_feed', 'campus', 'review', 'resolved', 'created_at'))
 
 
 class Claim(db.Model):
@@ -106,12 +108,23 @@ class Attempt(db.Model):
     created_at = db.Column(db.DateTime, nullable=False, default=now, index=True)
 
 
+def initialize_database():
+    """显式初始化或升级；旧物品归西校区，可重复执行，不重建表。"""
+    db.create_all()
+    with db.engine.begin() as connection:
+        columns = {column['name'] for column in inspect(connection).get_columns('item')}
+        if 'campus' not in columns:
+            connection.exec_driver_sql("ALTER TABLE item ADD COLUMN campus VARCHAR(20) NOT NULL DEFAULT '西校区'")
+        index = next(index for index in Item.__table__.indexes if index.name == 'ix_item_campus_feed')
+        index.create(connection, checkfirst=True)
+
+
 def signed_in(view):
     @wraps(view)
     def wrapped(*args, **kwargs):
         if not g.user:
             flash('请先登录，再继续操作。', 'info')
-            return redirect(url_for('login', next=request.path))
+            return redirect(url_for('login', next=request.full_path.rstrip('?')))
         return view(*args, **kwargs)
     return wrapped
 
@@ -161,23 +174,44 @@ def create_app(test_config=None):
         UPLOAD_BUDGET_MB=int(os.environ.get('UPLOAD_BUDGET_MB', '120')),
         SITE_NAME=os.environ.get('SITE_NAME', campus['网站名称']),
         SCHOOL_NAME=os.environ.get('SCHOOL_NAME', campus['学校名称']),
-        CAMPUS_LOCATIONS=campus['校园地点'],
+        CAMPUSES=campus['校区地点'],
+        DEFAULT_CAMPUS=campus['默认校区'],
     )
     if os.environ.get('ALLOWED_HOSTS'):
         app.config['TRUSTED_HOSTS'] = os.environ['ALLOWED_HOSTS'].split(',')
     if test_config:
         app.config.update(test_config)
+    # 兼容旧 .env 中随首版复制的标题，避免东校区页面仍标为西校区。
+    if app.config['SITE_NAME'] == '西校区失物招领':
+        app.config['SITE_NAME'] = '校园失物招领'
+    if app.config['SCHOOL_NAME'] == '保定职业技术学院（西校区）':
+        app.config['SCHOOL_NAME'] = '保定职业技术学院'
     Path(app.config['UPLOAD_FOLDER']).mkdir(parents=True, exist_ok=True)
     db.init_app(app)
     csrf.init_app(app)
 
     @app.before_request
     def load_user():
+        g.campus = session.get('campus', app.config['DEFAULT_CAMPUS'])
+        if g.campus not in app.config['CAMPUSES']:
+            g.campus = app.config['DEFAULT_CAMPUS']
+        if request.endpoint in ('index', 'publish') and 'campus' in request.args:
+            selected = request.args['campus']
+            if selected not in app.config['CAMPUSES']:
+                abort(400)
+            g.campus = selected
+            if request.method == 'GET':
+                session['campus'] = selected
         g.user = db.session.get(User, session.get('user_id')) if session.get('user_id') else None
         if g.user and (g.user.blocked or not hmac.compare_digest(
                 session.get('auth_stamp', ''), auth_stamp(g.user, app.secret_key))):
             session.clear()
             g.user = None
+
+    @app.url_defaults
+    def campus_urls(endpoint, values):
+        if endpoint in ('index', 'publish'):
+            values.setdefault('campus', getattr(g, 'campus', app.config['DEFAULT_CAMPUS']))
 
     @app.after_request
     def headers(response):
@@ -195,8 +229,9 @@ def create_app(test_config=None):
     def shared():
         return dict(categories=CATEGORIES, review_names=REVIEW_NAMES, claim_names=CLAIM_NAMES,
                     today=(now() + timedelta(hours=8)).date(), site_name=app.config['SITE_NAME'],
-                    school_name=app.config['SCHOOL_NAME'],
-                    campus_locations=app.config['CAMPUS_LOCATIONS'])
+                    school_name=app.config['SCHOOL_NAME'], campuses=app.config['CAMPUSES'],
+                    current_campus=getattr(g, 'campus', app.config['DEFAULT_CAMPUS']),
+                    campus_locations=app.config['CAMPUSES'][getattr(g, 'campus', app.config['DEFAULT_CAMPUS'])])
 
     @app.template_filter('beijing')
     def beijing(value):
@@ -211,6 +246,7 @@ def create_app(test_config=None):
 
     def begin_session(user):
         session.clear()
+        session['campus'] = g.campus
         session['user_id'] = user.id
         session['auth_stamp'] = auth_stamp(user, app.secret_key)
         session.permanent = True
@@ -316,13 +352,15 @@ def create_app(test_config=None):
         category = request.args.get('category', '')
         location = request.args.get('location', '')
         status = request.args.get('status', 'open')
-        query = select(Item).where(Item.review == 'approved', Item.is_demo.is_(False))
+        query = select(Item).where(Item.review == 'approved', Item.is_demo.is_(False), Item.campus == g.campus)
         if kind in ('lost', 'found'):
             query = query.where(Item.kind == kind)
         if category in CATEGORIES:
             query = query.where(Item.category == category)
-        if location in app.config['CAMPUS_LOCATIONS']:
+        if location in app.config['CAMPUSES'][g.campus]:
             query = query.where(Item.location == location)
+        else:
+            location = ''
         if status == 'closed':
             query = query.where(Item.resolved.is_(True))
         elif status != 'all':
@@ -331,8 +369,8 @@ def create_app(test_config=None):
             query = query.where(or_(Item.title.contains(q, autoescape=True), Item.location.contains(q, autoescape=True), Item.description.contains(q, autoescape=True)))
         page = db.paginate(query.options(joinedload(Item.owner)).order_by(Item.created_at.desc(), Item.id.desc()), per_page=12, error_out=False)
         handover_ids = set(db.session.scalars(select(Claim.item_id).where(Claim.item_id.in_([i.id for i in page.items]), Claim.status == 'accepted')))
-        counts = dict(db.session.execute(select(Item.kind, db.func.count()).where(Item.review == 'approved', Item.resolved.is_(False), Item.is_demo.is_(False)).group_by(Item.kind)).all())
-        returned = db.session.scalar(select(db.func.count()).select_from(Item).where(Item.review == 'approved', Item.resolved.is_(True), Item.is_demo.is_(False)))
+        counts = dict(db.session.execute(select(Item.kind, db.func.count()).where(Item.review == 'approved', Item.resolved.is_(False), Item.is_demo.is_(False), Item.campus == g.campus).group_by(Item.kind)).all())
+        returned = db.session.scalar(select(db.func.count()).select_from(Item).where(Item.review == 'approved', Item.resolved.is_(True), Item.is_demo.is_(False), Item.campus == g.campus))
         return render_template('首页.html', page=page, q=q, kind=kind, category=category, location=location, status=status, counts=counts, returned=returned, handover_ids=handover_ids)
 
     @app.route('/register', methods=['GET', 'POST'])
@@ -384,6 +422,7 @@ def create_app(test_config=None):
     @app.post('/logout')
     def logout():
         session.clear()
+        session['campus'] = g.campus
         return redirect(url_for('index'))
 
     @app.route('/me/password', methods=['GET', 'POST'])
@@ -412,11 +451,14 @@ def create_app(test_config=None):
 
     def item_fields():
         kind, category = field('kind'), field('category')
+        selected_campus = field('campus', 1, 20)
+        if selected_campus not in app.config['CAMPUSES']:
+            raise ValueError('请选择有效的校区。')
         if kind not in ('lost', 'found') or category not in CATEGORIES:
             raise ValueError('请选择有效的信息类型和物品分类。')
         location = field('location', 2, 60)
-        if location not in app.config['CAMPUS_LOCATIONS']:
-            raise ValueError('请选择列表中的校园地点。')
+        if location not in app.config['CAMPUSES'][selected_campus]:
+            raise ValueError('请选择所属校区内的地点，切换校区后需要重新选择地点。')
         location_detail = request.form.get('location_detail', '').strip()
         if len(location_detail) > 100:
             raise ValueError('位置补充最多填写 100 个字符。')
@@ -426,7 +468,7 @@ def create_app(test_config=None):
             raise ValueError('请选择有效的遗失或拾取日期。')
         if happened > (now() + timedelta(hours=8)).date() or happened < date(2020, 1, 1):
             raise ValueError('日期不能晚于今天，也不能早于 2020 年。')
-        return dict(kind=kind, category=category, happened_on=happened, location=location,
+        return dict(kind=kind, category=category, campus=selected_campus, happened_on=happened, location=location,
                     location_detail=location_detail, title=field('title', 2, 60),
                     description=field('description', maximum=None), contact=field('contact', 3, 120))
 
@@ -452,6 +494,7 @@ def create_app(test_config=None):
                 item.image_name = image_name
                 db.session.add(item)
                 db.session.commit()
+                session['campus'] = item.campus
                 flash('信息已提交，管理员审核通过后会公开展示。', 'success')
                 return redirect(url_for('detail', item_id=item.id))
             except ValueError as exc:
@@ -477,7 +520,7 @@ def create_app(test_config=None):
             flash('物品已找回或正在交接，不能修改。请先取消尚未完成的交接。', 'info')
             return redirect(url_for('detail', item_id=item.id))
         error, new_image = None, None
-        values = {name: getattr(item, name) for name in ('kind', 'category', 'title', 'location', 'location_detail', 'description', 'contact')}
+        values = {name: getattr(item, name) for name in ('kind', 'category', 'title', 'campus', 'location', 'location_detail', 'description', 'contact')}
         values['happened_on'] = item.happened_on.isoformat()
         if request.method == 'POST':
             values = request.form
@@ -494,6 +537,7 @@ def create_app(test_config=None):
                 item.review, item.review_note = 'pending', ''
                 close_applications(item.id)
                 db.session.commit()
+                session['campus'] = item.campus
                 if old_image and old_image != item.image_name:
                     remove_image(old_image)
                 flash('修改已保存，重新审核通过后公开。原有待核对申请已结束，对方可重新提交。', 'success')
@@ -709,9 +753,9 @@ def create_app(test_config=None):
 
     @app.cli.command('init-db')
     def init_db():
-        """创建缺失的数据表，不删除已有数据。"""
-        db.create_all()
-        click.echo('数据库已准备好。请继续执行 create-admin 创建管理员。')
+        """创建或升级数据表，保留已有数据，旧信息归入西校区。"""
+        initialize_database()
+        click.echo('数据库已准备好，旧信息归入西校区。新安装请执行 create-admin 创建管理员。')
 
     @app.cli.command('create-admin')
     @click.option('--username', prompt='管理员昵称')
