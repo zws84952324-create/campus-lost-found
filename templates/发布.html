@@ -1,0 +1,18 @@
+{% extends '基础.html' %}
+{% block title %}发布信息{% endblock %}
+{% block content %}
+<a class="back-link caption-1" href="{{ url_for('index') }}">← 返回失物广场</a>
+<div class="section-heading"><div><p class="eyebrow caption-3">让一条线索被看见</p><h1 class="heading-3">发布失物信息</h1></div><span class="caption-2">审核后公开展示</span></div>
+<div class="form-layout"><section class="form-panel">
+{% if error %}<p class="notice error body-6" role="alert">{{ error }}</p>{% endif %}
+<form method="post" enctype="multipart/form-data" class="stack-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<fieldset class="kind-picker"><legend class="title-4">你想发布什么？</legend><label><input type="radio" name="kind" value="lost" required {{ 'checked' if request.form.get('kind', request.args.get('kind','lost')) == 'lost' }}><span><strong class="title-3">我丢了东西</strong><small class="caption-2">发布寻物启事</small></span></label><label><input type="radio" name="kind" value="found" {{ 'checked' if request.form.get('kind', request.args.get('kind','lost')) == 'found' }}><span><strong class="title-3">我捡到了东西</strong><small class="caption-2">发布拾物招领</small></span></label></fieldset>
+<label class="title-4">物品标题<input name="title" value="{{ request.form.get('title','') }}" required minlength="2" maxlength="60" placeholder="例如：一串带蓝色挂件的钥匙"></label>
+<div class="form-row"><label class="title-4">物品分类<select name="category" required><option value="">请选择分类</option>{% for c in categories %}<option {{ 'selected' if request.form.get('category') == c }}>{{ c }}</option>{% endfor %}</select></label><label class="title-4">遗失或拾取日期<input type="date" name="happened_on" value="{{ request.form.get('happened_on', today.isoformat()) }}" min="2020-01-01" max="{{ today.isoformat() }}" required></label></div>
+<div class="form-row"><label class="title-4">校园地点<select name="location" required><option value="">请选择地点</option>{% for place in campus_locations %}<option {{ 'selected' if request.form.get('location') == place }}>{{ place }}</option>{% endfor %}</select></label><label class="title-4">位置补充 <span class="caption-2 muted">选填</span><input name="location_detail" value="{{ request.form.get('location_detail','') }}" maxlength="100" placeholder="例如：一楼入口左侧"></label></div>
+<label class="title-4">物品描述<textarea name="description" required minlength="10" maxlength="1500" rows="5" placeholder="描述物品外观、时间和经过。请保留部分独有特征，用于私下核对。">{{ request.form.get('description','') }}</textarea></label>
+<label class="title-4">物品照片 <span class="caption-2 muted">选填</span><input type="file" name="image" accept="image/jpeg,image/png,image/webp" data-image-input><span class="caption-2 muted">支持 JPG、PNG、WebP，最大 6 MB。请先遮挡证件号码、姓名等敏感信息。</span></label><div class="image-preview" hidden><img alt="待上传照片预览" width="320" height="220"><p class="caption-2" data-image-message></p></div>
+<label class="title-4">你的联系方式<input name="contact" value="{{ request.form.get('contact','') }}" required minlength="3" maxlength="120" placeholder="微信号或手机号，注明联系方式类型"><span class="caption-2 muted">不会出现在公开列表，核对通过后才向对方展示；管理员可查看。</span></label>
+<button class="button button-md" type="submit">提交审核 <span aria-hidden="true">↗</span></button></form></section>
+<aside class="side-note"><span class="note-label caption-3">发布前的小提醒</span><h2 class="heading-5">信息够清楚，<br>隐私留给自己。</h2><ol class="body-6"><li>选择最接近的地点，在“位置补充”里说明具体位置。</li><li>不要公开学号、证件号码、寝室号或他人的联系方式。</li><li>拾到证件时，请遮住个人信息再拍照。</li><li>不要提前转账，也不要提供验证码。</li></ol><a class="caption-1" href="{{ url_for('about', page='help') }}">查看完整使用帮助 →</a></aside></div>
+{% endblock %}

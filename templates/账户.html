@@ -1,0 +1,14 @@
+{% extends '基础.html' %}
+{% block title %}{{ '创建账号' if mode == 'register' else '登录' }}{% endblock %}
+{% block content %}
+<section class="auth-layout"><div class="auth-intro"><p class="eyebrow caption-3">{{ school_name }}</p><h1 class="heading-2">让一次偶遇，<br>变成一次归还。</h1><p class="body-3">登录后发布信息、提供线索，<br>也能随时查看认领进度。</p><img src="{{ url_for('static', filename='校园物件.svg') }}" alt="校园失物插画" width="560" height="400"></div>
+<div class="form-panel"><h2 class="heading-4">{{ '创建你的账号' if mode == 'register' else '欢迎回来' }}</h2><p class="body-6 muted">{{ '使用昵称即可，不需要提供学号或身份证号码。' if mode == 'register' else '输入昵称和密码，继续关注你的校园线索。' }}</p>
+{% if error %}<p class="notice error body-6" role="alert">{{ error }}</p>{% endif %}
+<form method="post" class="stack-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<label class="title-4">昵称<input name="username" value="{{ request.form.get('username','') }}" minlength="2" maxlength="24" required autocomplete="username" placeholder="中文、字母、数字或下划线"></label>
+<label class="title-4">密码<input type="password" name="password" minlength="{{ 10 if mode == 'register' else 1 }}" maxlength="128" required autocomplete="{{ 'new-password' if mode == 'register' else 'current-password' }}" placeholder="{{ '至少 10 个字符' if mode == 'register' else '输入你的密码' }}"></label>
+{% if mode == 'register' %}<label class="title-4">确认密码<input type="password" name="confirm_password" minlength="10" maxlength="128" required autocomplete="new-password" placeholder="再输入一次密码"></label><label class="check-label caption-2"><input type="checkbox" name="agree" value="yes" required {{ 'checked' if request.form.get('agree') }}> <span>我已阅读并同意<a href="{{ url_for('about', page='rules') }}" target="_blank" rel="noopener">使用规则</a>和<a href="{{ url_for('about', page='privacy') }}" target="_blank" rel="noopener">隐私说明</a>。</span></label>{% endif %}
+<button type="submit" class="button button-md full-width">{{ '创建账号' if mode == 'register' else '登录' }}</button></form>
+<p class="auth-switch body-6">{{ '已经有账号？' if mode == 'register' else '第一次来这里？' }}<a href="{{ url_for('login' if mode == 'register' else 'register') }}">{{ '去登录' if mode == 'register' else '创建账号' }} →</a></p>
+{% if mode == 'login' %}<p class="caption-2 muted">忘记密码可联系项目维护者处理。本项目不接入学校统一身份认证。</p>{% endif %}</div></section>
+{% endblock %}

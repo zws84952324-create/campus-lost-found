@@ -1,0 +1,28 @@
+{% macro card(item) %}
+<article class="item-card">
+  <a href="{{ url_for('detail', item_id=item.id) }}" class="card-link" aria-label="查看：{{ item.title }}">
+    <div class="card-picture tone-{{ item.category|length % 3 }}">
+      {% if item.image_name %}<img src="{{ url_for('item_image', item_id=item.id) }}" alt="{{ item.title }}的物品照片" loading="lazy" width="640" height="420">{% else %}
+        <div class="object-art object-{{ {'钥匙':'key','书本文具':'book','数码设备':'earbuds','包袋衣物':'bag','日用物品':'cup','证件卡片':'card'}.get(item.category, 'box') }}" aria-hidden="true"><span></span><i></i><b></b></div>
+        <span class="no-photo caption-5">暂无实拍 · 分类示意</span>
+      {% endif %}
+      <span class="badge {{ 'badge-lost' if item.kind == 'lost' else 'badge-found' }} caption-3">{{ '寻物启事' if item.kind == 'lost' else '拾物招领' }}</span>
+      {% if item.resolved %}<span class="resolved-label caption-3">已找回</span>{% endif %}
+    </div>
+    <div class="card-copy">
+      <div class="card-topline caption-5"><span>{{ item.category }}</span><span>{{ item.happened_on.strftime('%m月%d日') }}</span></div>
+      <h3 class="title-2">{{ item.title }}</h3>
+      <p class="card-location body-6"><span aria-hidden="true">⌖</span> {{ item.location }}</p>
+      <div class="card-bottom caption-5"><span>{{ '演示信息' if item.is_demo else item.owner.username }}</span><span>{{ '查看进度' if item.resolved else '查看详情' }} <span aria-hidden="true">↗</span></span></div>
+    </div>
+  </a>
+</article>
+{% endmacro %}
+
+{% macro pagination(page, endpoint, args={}) %}
+{% if page.pages > 1 %}<nav class="pagination" aria-label="分页">
+  {% if page.has_prev %}<a class="button button-secondary button-sm" href="{{ url_for(endpoint, page=page.prev_num, **args) }}">上一页</a>{% endif %}
+  <span class="caption-2">第 {{ page.page }} / {{ page.pages }} 页</span>
+  {% if page.has_next %}<a class="button button-secondary button-sm" href="{{ url_for(endpoint, page=page.next_num, **args) }}">下一页</a>{% endif %}
+</nav>{% endif %}
+{% endmacro %}

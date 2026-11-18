@@ -1,0 +1,18 @@
+name: 项目检查
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: 安装依赖
+        run: pip install -r requirements.txt pytest
+      - name: 运行业务与权限测试
+        run: python -m pytest -q -p no:cacheprovider tests

@@ -1,0 +1,11 @@
+.venv/
+.env*
+!.env.example
+instance/
+__pycache__/
+.pytest_cache/
+*.pyc
+*.log
+.检查临时/
+.测试临时/
+*.zip
