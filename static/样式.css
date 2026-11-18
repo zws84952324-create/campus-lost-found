@@ -823,13 +823,6 @@ a:active {
   gap: 24px
 }
 
-.demo-banner {
-  text-align: center;
-  background: #f5e5b9;
-  color: #75591f;
-  padding: 8px 16px
-}
-
 .flash-stack {
   display: grid;
   gap: 8px;

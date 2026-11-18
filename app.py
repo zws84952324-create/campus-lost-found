@@ -73,6 +73,7 @@ class Item(db.Model):
     review = db.Column(db.String(12), nullable=False, default='pending', index=True)
     review_note = db.Column(db.String(200), nullable=False, default='')
     resolved = db.Column(db.Boolean, nullable=False, default=False)
+    # 兼容旧版数据库；旧演示记录永不进入真实认领页面。
     is_demo = db.Column(db.Boolean, nullable=False, default=False)
     created_at = db.Column(db.DateTime, nullable=False, default=now, index=True)
     __table_args__ = (db.Index('ix_item_feed', 'review', 'resolved', 'kind', 'created_at'),)
@@ -153,7 +154,6 @@ def create_app(test_config=None):
         SITE_NAME=os.environ.get('SITE_NAME', campus['网站名称']),
         SCHOOL_NAME=os.environ.get('SCHOOL_NAME', campus['学校名称']),
         CAMPUS_LOCATIONS=campus['校园地点'],
-        DEMO_MODE=os.environ.get('DEMO_MODE', '0') == '1',
     )
     if os.environ.get('ALLOWED_HOSTS'):
         app.config['TRUSTED_HOSTS'] = os.environ['ALLOWED_HOSTS'].split(',')
@@ -186,7 +186,7 @@ def create_app(test_config=None):
     def shared():
         return dict(categories=CATEGORIES, review_names=REVIEW_NAMES, claim_names=CLAIM_NAMES,
                     today=(now() + timedelta(hours=8)).date(), site_name=app.config['SITE_NAME'],
-                    school_name=app.config['SCHOOL_NAME'], demo_mode=app.config['DEMO_MODE'],
+                    school_name=app.config['SCHOOL_NAME'],
                     campus_locations=app.config['CAMPUS_LOCATIONS'])
 
     @app.template_filter('beijing')
@@ -212,6 +212,8 @@ def create_app(test_config=None):
         db.session.commit()
 
     def visible(item):
+        if item.is_demo:
+            return False
         return item.review == 'approved' or (g.user and (g.user.id == item.owner_id or g.user.is_admin))
 
     def save_image(upload):
@@ -250,7 +252,7 @@ def create_app(test_config=None):
         category = request.args.get('category', '')
         location = request.args.get('location', '')
         status = request.args.get('status', 'open')
-        query = select(Item).where(Item.review == 'approved')
+        query = select(Item).where(Item.review == 'approved', Item.is_demo.is_(False))
         if kind in ('lost', 'found'):
             query = query.where(Item.kind == kind)
         if category in CATEGORIES:
@@ -264,8 +266,8 @@ def create_app(test_config=None):
         if q:
             query = query.where(or_(Item.title.contains(q, autoescape=True), Item.location.contains(q, autoescape=True), Item.description.contains(q, autoescape=True)))
         page = db.paginate(query.order_by(Item.created_at.desc(), Item.id.desc()), per_page=12, error_out=False)
-        counts = dict(db.session.execute(select(Item.kind, db.func.count()).where(Item.review == 'approved', Item.resolved.is_(False)).group_by(Item.kind)).all())
-        returned = db.session.scalar(select(db.func.count()).select_from(Item).where(Item.review == 'approved', Item.resolved.is_(True)))
+        counts = dict(db.session.execute(select(Item.kind, db.func.count()).where(Item.review == 'approved', Item.resolved.is_(False), Item.is_demo.is_(False)).group_by(Item.kind)).all())
+        returned = db.session.scalar(select(db.func.count()).select_from(Item).where(Item.review == 'approved', Item.resolved.is_(True), Item.is_demo.is_(False)))
         return render_template('首页.html', page=page, q=q, kind=kind, category=category, location=location, status=status, counts=counts, returned=returned)
 
     @app.route('/register', methods=['GET', 'POST'])
@@ -392,7 +394,7 @@ def create_app(test_config=None):
     @signed_in
     def claim(item_id):
         item = db.get_or_404(Item, item_id)
-        if item.review != 'approved' or item.resolved or item.owner_id == g.user.id:
+        if item.is_demo or item.review != 'approved' or item.resolved or item.owner_id == g.user.id:
             abort(403)
         try:
             recent = db.session.scalar(select(db.func.count()).select_from(Claim).where(Claim.claimant_id == g.user.id, Claim.created_at > now() - timedelta(days=1)))
@@ -458,9 +460,9 @@ def create_app(test_config=None):
     @app.get('/me')
     @signed_in
     def dashboard():
-        items = db.paginate(select(Item).where(Item.owner_id == g.user.id).order_by(Item.created_at.desc()), per_page=12, error_out=False)
-        claims = db.session.scalars(select(Claim).where(Claim.claimant_id == g.user.id).order_by(Claim.created_at.desc()).limit(50)).all()
-        incoming = db.session.scalars(select(Claim).join(Item).where(Item.owner_id == g.user.id, Claim.status == 'pending').order_by(Claim.created_at.desc()).limit(50)).all()
+        items = db.paginate(select(Item).where(Item.owner_id == g.user.id, Item.is_demo.is_(False)).order_by(Item.created_at.desc()), per_page=12, error_out=False)
+        claims = db.session.scalars(select(Claim).join(Item).where(Claim.claimant_id == g.user.id, Item.is_demo.is_(False)).order_by(Claim.created_at.desc()).limit(50)).all()
+        incoming = db.session.scalars(select(Claim).join(Item).where(Item.owner_id == g.user.id, Claim.status == 'pending', Item.is_demo.is_(False)).order_by(Claim.created_at.desc()).limit(50)).all()
         return render_template('我的记录.html', page=items, claims=claims, incoming=incoming)
 
     @app.get('/admin')
@@ -469,8 +471,8 @@ def create_app(test_config=None):
         state = request.args.get('state', 'pending')
         if state not in REVIEW_NAMES:
             state = 'pending'
-        page = db.paginate(select(Item).where(Item.review == state).order_by(Item.created_at.desc()), per_page=12, error_out=False)
-        pending_count = db.session.scalar(select(db.func.count()).select_from(Item).where(Item.review == 'pending'))
+        page = db.paginate(select(Item).where(Item.review == state, Item.is_demo.is_(False)).order_by(Item.created_at.desc()), per_page=12, error_out=False)
+        pending_count = db.session.scalar(select(db.func.count()).select_from(Item).where(Item.review == 'pending', Item.is_demo.is_(False)))
         return render_template('管理后台.html', page=page, state=state, pending_count=pending_count)
 
     @app.post('/admin/items/<int:item_id>')
@@ -552,31 +554,5 @@ def create_app(test_config=None):
         user.blocked = not unblock
         db.session.commit()
         click.echo('账号状态已更新。')
-
-    @app.cli.command('seed-demo')
-    def seed_demo():
-        """只在 DEMO_MODE=1 时写入明确标注的演示记录。"""
-        if not app.config['DEMO_MODE']:
-            raise click.ClickException('仅演示环境可执行。先设置 DEMO_MODE=1，勿在正式站点执行。')
-        if db.session.scalar(select(Item.id).where(Item.is_demo.is_(True)).limit(1)):
-            click.echo('演示数据已存在，未重复写入。')
-            return
-        user = User(username='演示发布者_' + secrets.token_hex(3), password_hash=generate_password_hash(secrets.token_urlsafe(32)))
-        db.session.add(user)
-        db.session.flush()
-        samples = [('found','一串带蓝色挂件的钥匙','钥匙','弘毅楼'),
-                   ('lost','米白色帆布包，有一本笔记','包袋衣物','大食堂'),
-                   ('found','一本写满批注的英语书','书本文具','笃学楼'),
-                   ('lost','深灰色无线耳机充电盒','数码设备','操场'),
-                   ('found','透明磨砂水杯','日用物品','篮球场'),
-                   ('found','一张校园卡，等待主人','证件卡片','小食堂')]
-        for i, (kind, title, category, location) in enumerate(samples):
-            db.session.add(Item(owner_id=user.id, kind=kind, title=title, category=category, location=location,
-                                happened_on=(now()+timedelta(hours=8)-timedelta(days=i//2)).date(),
-                                description='这是一条界面演示信息，并非真实失物。实际使用时请描述物品外观与发现位置，并保留可供私下核对的细节。',
-                                contact='演示信息，不提供真实联系方式', review='approved', is_demo=True,
-                                created_at=now()-timedelta(hours=i*3), resolved=i==5))
-        db.session.commit()
-        click.echo('已加入 6 条明确标注的演示信息。')
 
     return app

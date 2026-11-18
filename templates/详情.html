@@ -2,7 +2,6 @@
 {% block title %}{{ item.title }}{% endblock %}
 {% block content %}
   <a class="back-link caption-1" href="{{ url_for('index') }}">← 返回失物广场</a>
-  {% if item.is_demo %}<p class="notice info body-6">这是一条虚构的演示信息，不代表校园内真实发生的事件。</p>{% endif %}
   {% if item.review != "approved" %}<p class="notice info body-6">{{ review_names[item.review] }}，当前信息未公开。{{ item.review_note }}</p>{% endif %}
   <section class="detail-layout">
     <article class="form-panel detail-main">

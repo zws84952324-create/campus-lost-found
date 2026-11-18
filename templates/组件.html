@@ -24,7 +24,7 @@
         <div class="card-topline caption-5"><span>{{ item.category }}</span><span>{{ item.happened_on.strftime("%m月%d日") }}</span></div>
         <h3 class="title-2">{{ item.title }}</h3>
         <p class="card-location body-6"><span aria-hidden="true">⌖</span> {{ item.location }}</p>
-        <div class="card-bottom caption-5"><span>{{ '演示信息' if item.is_demo else item.owner.username }}</span><span>{{ '查看进度' if item.resolved else '查看详情' }} <span aria-hidden="true">↗</span></span></div>
+        <div class="card-bottom caption-5"><span>{{ item.owner.username }}</span><span>{{ '查看进度' if item.resolved else '查看详情' }} <span aria-hidden="true">↗</span></span></div>
       </div>
     </a>
   </article>

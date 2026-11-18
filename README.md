@@ -4,7 +4,7 @@
 
 > 学生课程项目，非学校官方平台。源码发布到 GitHub 不等于网站已经上线。
 
-代码采用 [MIT 开源许可证](LICENSE)，可用于学习和改进。用户数据库、照片和真实配置不属于开源内容，不进入仓库。
+代码采用 [MIT 开源许可证](LICENSE)，可用于学习和改进。用户数据库、照片和真实配置不属于开源内容，不进入仓库。项目直接用于真实发布与认领，不生成虚构样例；新安装时信息列表与统计为零。
 
 ![首页预览](交付预览/电脑首页.png)
 
@@ -24,7 +24,7 @@
 Windows 在项目目录打开 PowerShell：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\启动项目.ps1 --demo
+powershell -ExecutionPolicy Bypass -File .\启动项目.ps1
 ```
 
 或者手动启动：
@@ -32,10 +32,10 @@ powershell -ExecutionPolicy Bypass -File .\启动项目.ps1 --demo
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe 启动项目.py --demo
+.\.venv\Scripts\python.exe 启动项目.py
 ```
 
-浏览器访问 `http://127.0.0.1:5000`。演示版使用独立数据库，虚构信息均有标记。去掉 `--demo` 使用空白的正式数据环境。
+浏览器访问 `http://127.0.0.1:5000`。新安装的数据为空，同学可以注册并发布真实信息，管理员审核后公开展示。
 
 创建正式本地环境的管理员：
 
@@ -44,7 +44,7 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m flask --app app create-admin
 ```
 
-没有默认管理员密码。演示数据库也不提供固定密码账号，避免误用到公网。
+没有默认账号或管理员密码，首次使用必须自行创建管理员。注册的普通账号没有审核权限。
 
 ## 校园地点
 

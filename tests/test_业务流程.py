@@ -19,7 +19,7 @@ def app(tmp_path):
     app = create_app({'TESTING': True, 'SECRET_KEY': 'tests-only-secret',
                       'SQLALCHEMY_DATABASE_URI': 'sqlite:///' + (tmp_path / '测试.db').as_posix(),
                       'UPLOAD_FOLDER': str(tmp_path / '图片'), 'WTF_CSRF_ENABLED': False,
-                      'SESSION_COOKIE_SECURE': False, 'DEMO_MODE': False})
+                      'SESSION_COOKIE_SECURE': False})
     with app.app_context():
         db.create_all()
         for name in ('发布同学', '认领同学', '其他同学', '管理员'):
@@ -238,3 +238,17 @@ def test_cli_and_headers(app):
     assert response.headers['X-Frame-Options'] == 'DENY'
     assert "script-src 'self'" in response.headers['Content-Security-Policy']
     assert 'no-store' in response.headers['Cache-Control']
+
+
+def test_legacy_demo_stays_hidden(app):
+    item_id = post_item(app, is_demo=True)
+    client = app.test_client()
+    html = client.get('/').get_data(as_text=True)
+    assert '蓝色挂件钥匙' not in html
+    assert '0 条符合条件' in html
+    assert '本地演示环境' not in html
+    assert client.get(f'/items/{item_id}').status_code == 404
+    assert client_as(app, '发布同学').get(f'/items/{item_id}').status_code == 404
+    claimant = client_as(app, '认领同学')
+    assert claimant.post(f'/items/{item_id}/claim', data={'proof':'这串钥匙是我的，有星星挂件。','contact':'测试联系'}).status_code == 403
+    assert '蓝色挂件钥匙' not in client_as(app, '管理员').get('/admin?state=approved').get_data(as_text=True)
