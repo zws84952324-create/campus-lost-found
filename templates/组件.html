@@ -1,4 +1,4 @@
-{% macro card(item) %}
+{% macro card(item, handover_ids=[]) %}
   <article class="item-card">
     <a href="{{ url_for('detail', item_id=item.id) }}"
        class="card-link"
@@ -18,7 +18,7 @@
           <span class="no-photo caption-5">暂无实拍 · 分类示意</span>
         {% endif %}
         <span class="badge {{ 'badge-lost' if item.kind == 'lost' else 'badge-found' }} caption-3">{{ '寻物启事' if item.kind == 'lost' else '拾物招领' }}</span>
-        {% if item.resolved %}<span class="resolved-label caption-3">已找回</span>{% endif %}
+        {% if item.resolved %}<span class="resolved-label caption-3">已找回</span>{% elif item.id in handover_ids %}<span class="resolved-label caption-3">等待交接</span>{% endif %}
       </div>
       <div class="card-copy">
         <div class="card-topline caption-5"><span>{{ item.category }}</span><span>{{ item.happened_on.strftime("%m月%d日") }}</span></div>
@@ -29,14 +29,14 @@
     </a>
   </article>
 {% endmacro %}
-{% macro pagination(page, endpoint, args={}) %}
+{% macro pagination(page, endpoint, args={}, parameter='page') %}
   {% if page.pages > 1 %}
     <nav class="pagination" aria-label="分页">
       {% if page.has_prev %}<a class="button button-secondary button-sm"
-                               href="{{ url_for(endpoint, page=page.prev_num, **args) }}">上一页</a>{% endif %}
+                               href="{{ url_for(endpoint, **dict(args, **{parameter: page.prev_num})) }}">上一页</a>{% endif %}
       <span class="caption-2">第 {{ page.page }} / {{ page.pages }} 页</span>
       {% if page.has_next %}<a class="button button-secondary button-sm"
-                               href="{{ url_for(endpoint, page=page.next_num, **args) }}">下一页</a>{% endif %}
+                               href="{{ url_for(endpoint, **dict(args, **{parameter: page.next_num})) }}">下一页</a>{% endif %}
     </nav>
   {% endif %}
 {% endmacro %}

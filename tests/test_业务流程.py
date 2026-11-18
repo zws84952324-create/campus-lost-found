@@ -11,7 +11,7 @@ from sqlalchemy import select
 from werkzeug.security import generate_password_hash
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from app import create_app, db, User, Item, Claim, Attempt
+from app import create_app, db, User, Item, Claim, Attempt, auth_stamp
 
 
 @pytest.fixture
@@ -40,6 +40,8 @@ def client_as(app, name):
     client = app.test_client()
     with client.session_transaction() as session:
         session['user_id'] = user_id(app, name)
+        with app.app_context():
+            session['auth_stamp'] = auth_stamp(db.session.get(User, session['user_id']), app.secret_key)
     return client
 
 
@@ -115,14 +117,18 @@ def test_publish_review_claim_full_flow_and_privacy(app):
     assert 'claimant-private-contact' in owner.get(location).get_data(as_text=True)
     assert 'owner-private-contact' not in app.test_client().get(location).get_data(as_text=True)
     with app.app_context():
-        assert db.session.get(Item, item_id).resolved is True
+        assert db.session.get(Item, item_id).resolved is False
         assert db.session.get(Claim, application_id).status == 'accepted'
+    assert claimant.post(f'/claims/{application_id}/complete').status_code == 302
+    with app.app_context():
+        assert db.session.get(Item, item_id).resolved is True
+        assert db.session.get(Claim, application_id).status == 'completed'
 
 
 def test_invalid_fields_and_xss(app):
     owner = client_as(app, '发布同学')
     form = valid_form()
-    for field, value in [('location','不存在的楼'),('kind','bad'),('happened_on','2099-01-01'),('description','太短')]:
+    for field, value in [('location','不存在的楼'),('kind','bad'),('happened_on','2099-01-01'),('description','   ')]:
         bad = {**form, field:value}
         assert owner.post('/publish', data=bad).status_code == 400
     item_id = post_item(app, title='<script>alert(1)</script>')
@@ -190,7 +196,7 @@ def test_ownership_duplicate_and_close(app):
     assert app.test_client().get(f'/items/{item_id}').status_code == 404
     assert claimant.get('/me').status_code == 200
     with app.app_context():
-        assert db.session.scalar(select(Claim)).status == 'rejected'
+        assert db.session.scalar(select(Claim)).status == 'closed'
 
 
 def test_accept_only_one_claim(app):
@@ -203,7 +209,7 @@ def test_accept_only_one_claim(app):
     owner.post(f'/claims/{ids[0]}/decide', data={'action':'accept'})
     owner.post(f'/claims/{ids[1]}/decide', data={'action':'accept'})
     with app.app_context():
-        assert [db.session.get(Claim,i).status for i in ids] == ['accepted','rejected']
+        assert [db.session.get(Claim,i).status for i in ids] == ['accepted','pending']
 
 
 def test_rate_limit_login_and_publication_quota(app):
@@ -250,5 +256,5 @@ def test_legacy_demo_stays_hidden(app):
     assert client.get(f'/items/{item_id}').status_code == 404
     assert client_as(app, '发布同学').get(f'/items/{item_id}').status_code == 404
     claimant = client_as(app, '认领同学')
-    assert claimant.post(f'/items/{item_id}/claim', data={'proof':'这串钥匙是我的，有星星挂件。','contact':'测试联系'}).status_code == 403
+    assert claimant.post(f'/items/{item_id}/claim', data={'proof':'这串钥匙是我的，有星星挂件。','contact':'测试联系'}).status_code == 404
     assert '蓝色挂件钥匙' not in client_as(app, '管理员').get('/admin?state=approved').get_data(as_text=True)

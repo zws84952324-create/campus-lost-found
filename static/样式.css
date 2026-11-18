@@ -2041,3 +2041,13 @@ a:active {
     transform: none
   }
 }
+
+
+/* 校门照片保持原比例，完整展示校名，不在照片上覆盖文字。 */
+.campus-photo { margin: 0; min-width: 0; align-self: center; }
+.campus-photo img { width: 100%; height: auto; display: block; border-radius: 16px; }
+.campus-photo figcaption { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 12px; color: var(--muted); }
+@media(max-width:600px) {
+  .campus-photo figcaption { font-size: 12px; line-height: 16px; }
+  .pagination { gap: 12px; flex-wrap: wrap; }
+}

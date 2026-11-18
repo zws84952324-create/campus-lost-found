@@ -1,0 +1,14 @@
+{% macro actions(c) %}
+{% if c.status == 'accepted' and not c.item.resolved and c.item.review == 'approved' %}
+<form method="post" action="{{ url_for('complete_claim', claim_id=c.id) }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <button class="button button-sm" data-confirm="确认已经实际交还物品？确认后将标记找回，并结束其他待核对申请。">确认已交接</button>
+</form>
+{% endif %}
+{% if c.status in ('pending', 'accepted') and not c.item.resolved %}
+<form method="post" action="{{ url_for('cancel_claim', claim_id=c.id) }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <button class="button button-secondary button-sm" data-confirm="确定取消这次申请？双方将不再通过这次申请查看联系方式。">{{ '取消交接' if c.status == 'accepted' else '取消申请' }}</button>
+</form>
+{% endif %}
+{% endmacro %}

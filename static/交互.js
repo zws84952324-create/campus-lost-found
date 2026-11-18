@@ -83,6 +83,7 @@ document.querySelectorAll('form[method="post"]').forEach(form => {
   });
 });
 window.addEventListener('pageshow', () => {
+  document.querySelectorAll('[data-confirm]').forEach(button => delete button.dataset.confirmed);
   document.querySelectorAll('form').forEach(form => delete form.dataset.submitting);
   document.querySelectorAll('[aria-busy="true"]').forEach(button => {
     button.textContent = button.dataset.originalText;

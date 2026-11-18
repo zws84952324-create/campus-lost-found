@@ -12,6 +12,7 @@ import warnings
 from datetime import date, datetime, timedelta, timezone
 from functools import wraps
 from pathlib import Path
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 import click
@@ -23,7 +24,8 @@ from flask_wtf.csrf import CSRFError, CSRFProtect
 from PIL import Image, ImageOps, UnidentifiedImageError
 from sqlalchemy import event, or_, select, update
 from sqlalchemy.engine import Engine
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy.orm import joinedload
 from werkzeug.security import check_password_hash, generate_password_hash
 
 ROOT = Path(__file__).resolve().parent
@@ -31,12 +33,18 @@ db = SQLAlchemy()
 csrf = CSRFProtect()
 CATEGORIES = ('证件卡片', '数码设备', '钥匙', '包袋衣物', '书本文具', '日用物品', '其他')
 REVIEW_NAMES = {'pending': '待审核', 'approved': '已发布', 'rejected': '审核未通过', 'withdrawn': '已撤下'}
-CLAIM_NAMES = {'pending': '等待核对', 'accepted': '已确认', 'rejected': '未通过'}
+CLAIM_NAMES = {'pending': '等待核对', 'accepted': '等待交接', 'completed': '已交接',
+               'rejected': '未通过', 'cancelled': '已取消', 'closed': '已结束'}
 
 
 def now():
     # 数据库存 UTC，显示时统一转换为北京时间。
     return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def auth_stamp(user, secret):
+    """密码变化后旧 Cookie 自动失效，不把密码哈希放进 Cookie。"""
+    return hmac.new(secret.encode(), f'{user.id}:{user.password_hash}'.encode(), hashlib.sha256).hexdigest()
 
 
 @event.listens_for(Engine, 'connect')
@@ -103,7 +111,7 @@ def signed_in(view):
     def wrapped(*args, **kwargs):
         if not g.user:
             flash('请先登录，再继续操作。', 'info')
-            return redirect(url_for('login'))
+            return redirect(url_for('login', next=request.path))
         return view(*args, **kwargs)
     return wrapped
 
@@ -166,7 +174,8 @@ def create_app(test_config=None):
     @app.before_request
     def load_user():
         g.user = db.session.get(User, session.get('user_id')) if session.get('user_id') else None
-        if g.user and g.user.blocked:
+        if g.user and (g.user.blocked or not hmac.compare_digest(
+                session.get('auth_stamp', ''), auth_stamp(g.user, app.secret_key))):
             session.clear()
             g.user = None
 
@@ -193,9 +202,64 @@ def create_app(test_config=None):
     def beijing(value):
         return (value + timedelta(hours=8)).strftime('%m月%d日 %H:%M')
 
+    @app.template_filter('claim_label')
+    def claim_label(application):
+        # 老版在核对通过时已标记找回，保留旧记录的已完成含义。
+        if application.status == 'accepted' and application.item.resolved:
+            return '已交接'
+        return CLAIM_NAMES.get(application.status, '已结束')
+
+    def begin_session(user):
+        session.clear()
+        session['user_id'] = user.id
+        session['auth_stamp'] = auth_stamp(user, app.secret_key)
+        session.permanent = True
+
+    def next_page():
+        target = request.values.get('next', '')
+        try:
+            parsed = urlsplit(target)
+        except ValueError:
+            return url_for('dashboard')
+        if (not target.startswith('/') or target.startswith('//') or parsed.scheme or parsed.netloc
+                or '\\' in target or any(ord(char) < 32 for char in target)):
+            return url_for('dashboard')
+        try:
+            endpoint, _ = app.url_map.bind('').match(parsed.path, method='GET')
+        except Exception:
+            return url_for('dashboard')
+        if endpoint in ('login', 'register', 'static'):
+            return url_for('dashboard')
+        return target
+
+    def lock_item(item_id):
+        # 同一物品的状态操作先取得写锁；SQLite 和 MySQL 均使用同一顺序。
+        # 不新增字段，更新旧版网站不需要改变表结构。
+        db.session.execute(update(Item).where(Item.id == item_id).values(resolved=Item.resolved))
+        db.session.expire_all()
+        item = db.get_or_404(Item, item_id, populate_existing=True, with_for_update=True)
+        if item.is_demo:
+            abort(404)
+        return item
+
+    def accepted_claim(item_id, lock=False):
+        query = select(Claim).where(Claim.item_id == item_id, Claim.status == 'accepted')
+        return db.session.scalar(query.with_for_update() if lock else query)
+
+    def close_applications(item_id, statuses=('pending', 'accepted')):
+        db.session.execute(update(Claim).where(Claim.item_id == item_id, Claim.status.in_(statuses)).values(status='closed'))
+
+    def complete_item(item):
+        item.resolved = True
+        db.session.execute(update(Claim).where(Claim.item_id == item.id, Claim.status == 'accepted').values(status='completed'))
+        close_applications(item.id, ('pending',))
+
     def field(name, minimum=1, maximum=200):
         value = request.form.get(name, '').strip()
-        if not minimum <= len(value) <= maximum:
+        if maximum is None:
+            if not value:
+                raise ValueError('请填写物品描述。')
+        elif not minimum <= len(value) <= maximum:
             raise ValueError(f'请检查填写内容，长度应为 {minimum} 至 {maximum} 个字符。')
         return value
 
@@ -265,10 +329,11 @@ def create_app(test_config=None):
             query = query.where(Item.resolved.is_(False))
         if q:
             query = query.where(or_(Item.title.contains(q, autoescape=True), Item.location.contains(q, autoescape=True), Item.description.contains(q, autoescape=True)))
-        page = db.paginate(query.order_by(Item.created_at.desc(), Item.id.desc()), per_page=12, error_out=False)
+        page = db.paginate(query.options(joinedload(Item.owner)).order_by(Item.created_at.desc(), Item.id.desc()), per_page=12, error_out=False)
+        handover_ids = set(db.session.scalars(select(Claim.item_id).where(Claim.item_id.in_([i.id for i in page.items]), Claim.status == 'accepted')))
         counts = dict(db.session.execute(select(Item.kind, db.func.count()).where(Item.review == 'approved', Item.resolved.is_(False), Item.is_demo.is_(False)).group_by(Item.kind)).all())
         returned = db.session.scalar(select(db.func.count()).select_from(Item).where(Item.review == 'approved', Item.resolved.is_(True), Item.is_demo.is_(False)))
-        return render_template('首页.html', page=page, q=q, kind=kind, category=category, location=location, status=status, counts=counts, returned=returned)
+        return render_template('首页.html', page=page, q=q, kind=kind, category=category, location=location, status=status, counts=counts, returned=returned, handover_ids=handover_ids)
 
     @app.route('/register', methods=['GET', 'POST'])
     def register():
@@ -289,11 +354,9 @@ def create_app(test_config=None):
                 user = User(username=username, password_hash=generate_password_hash(password))
                 db.session.add(user)
                 db.session.commit()
-                session.clear()
-                session['user_id'] = user.id
-                session.permanent = True
+                begin_session(user)
                 flash('账号已创建，现在可以发布信息。', 'success')
-                return redirect(url_for('dashboard'))
+                return redirect(next_page())
             except IntegrityError:
                 db.session.rollback()
                 error = '这个昵称已被使用，请换一个。'
@@ -314,16 +377,65 @@ def create_app(test_config=None):
             if not valid or user.blocked:
                 error = '昵称或密码错误，或账号暂时不可用。'
             else:
-                session.clear()
-                session['user_id'] = user.id
-                session.permanent = True
-                return redirect(url_for('dashboard'))
+                begin_session(user)
+                return redirect(next_page())
         return render_template('账户.html', mode='login', error=error), 400 if error else 200
 
     @app.post('/logout')
     def logout():
         session.clear()
         return redirect(url_for('index'))
+
+    @app.route('/me/password', methods=['GET', 'POST'])
+    @signed_in
+    def change_password():
+        error = None
+        if request.method == 'POST':
+            rate_limit('change-password', 10, 15, identity=str(g.user.id))
+            current = request.form.get('current_password', '')
+            password = request.form.get('password', '')
+            if len(current) > 128 or not check_password_hash(g.user.password_hash, current):
+                error = '当前密码不正确，请重新输入。'
+            elif not 10 <= len(password) <= 128:
+                error = '新密码请使用 10 至 128 个字符。'
+            elif password != request.form.get('confirm_password'):
+                error = '两次输入的新密码不一致。'
+            elif password == current:
+                error = '新密码不能和当前密码相同。'
+            else:
+                g.user.password_hash = generate_password_hash(password)
+                db.session.commit()
+                begin_session(g.user)
+                flash('密码已修改，其他设备需要重新登录。', 'success')
+                return redirect(url_for('dashboard'))
+        return render_template('修改密码.html', error=error), 400 if error else 200
+
+    def item_fields():
+        kind, category = field('kind'), field('category')
+        if kind not in ('lost', 'found') or category not in CATEGORIES:
+            raise ValueError('请选择有效的信息类型和物品分类。')
+        location = field('location', 2, 60)
+        if location not in app.config['CAMPUS_LOCATIONS']:
+            raise ValueError('请选择列表中的校园地点。')
+        location_detail = request.form.get('location_detail', '').strip()
+        if len(location_detail) > 100:
+            raise ValueError('位置补充最多填写 100 个字符。')
+        try:
+            happened = date.fromisoformat(request.form.get('happened_on', ''))
+        except ValueError:
+            raise ValueError('请选择有效的遗失或拾取日期。')
+        if happened > (now() + timedelta(hours=8)).date() or happened < date(2020, 1, 1):
+            raise ValueError('日期不能晚于今天，也不能早于 2020 年。')
+        return dict(kind=kind, category=category, happened_on=happened, location=location,
+                    location_detail=location_detail, title=field('title', 2, 60),
+                    description=field('description', maximum=None), contact=field('contact', 3, 120))
+
+    def remove_image(filename):
+        if filename:
+            try:
+                (Path(app.config['UPLOAD_FOLDER']) / filename).unlink(missing_ok=True)
+            except OSError:
+                app.logger.warning('清理已失效图片失败，请维护者检查图片目录。')
 
     @app.route('/publish', methods=['GET', 'POST'])
     @signed_in
@@ -335,25 +447,7 @@ def create_app(test_config=None):
                 recent = db.session.scalar(select(db.func.count()).select_from(Item).where(Item.owner_id == g.user.id, Item.created_at > now() - timedelta(days=1)))
                 if recent >= 5 and not g.user.is_admin:
                     raise ValueError('每个账号每天最多发布 5 条，请明天再试。')
-                kind = field('kind')
-                category = field('category')
-                if kind not in ('lost', 'found') or category not in CATEGORIES:
-                    raise ValueError('请选择有效的信息类型和物品分类。')
-                location = field('location', 2, 60)
-                if location not in app.config['CAMPUS_LOCATIONS']:
-                    raise ValueError('请选择列表中的校园地点。')
-                location_detail = request.form.get('location_detail', '').strip()
-                if len(location_detail) > 100:
-                    raise ValueError('位置补充最多填写 100 个字符。')
-                try:
-                    happened = date.fromisoformat(request.form.get('happened_on', ''))
-                except ValueError:
-                    raise ValueError('请选择有效的遗失或拾取日期。')
-                if happened > (now() + timedelta(hours=8)).date() or happened < date(2020, 1, 1):
-                    raise ValueError('日期不能晚于今天，也不能早于 2020 年。')
-                item = Item(owner_id=g.user.id, kind=kind, category=category, happened_on=happened,
-                            title=field('title', 2, 60), location=location, location_detail=location_detail,
-                            description=field('description', 10, 1500), contact=field('contact', 3, 120))
+                item = Item(owner_id=g.user.id, **item_fields())
                 image_name = save_image(request.files.get('image'))
                 item.image_name = image_name
                 db.session.add(item)
@@ -361,10 +455,59 @@ def create_app(test_config=None):
                 flash('信息已提交，管理员审核通过后会公开展示。', 'success')
                 return redirect(url_for('detail', item_id=item.id))
             except ValueError as exc:
-                if image_name:
-                    (Path(app.config['UPLOAD_FOLDER']) / image_name).unlink(missing_ok=True)
+                db.session.rollback()
+                remove_image(image_name)
                 error = str(exc)
-        return render_template('发布.html', error=error), 400 if error else 200
+            except SQLAlchemyError:
+                db.session.rollback()
+                remove_image(image_name)
+                app.logger.exception('保存发布信息失败')
+                return render_template('发布.html', error='信息未保存，请稍后重新提交。', values=request.form, item=None), 503
+        return render_template('发布.html', error=error, values=request.form, item=None), 400 if error else 200
+
+    @app.route('/items/<int:item_id>/edit', methods=['GET', 'POST'])
+    @signed_in
+    def edit_item(item_id):
+        item = db.get_or_404(Item, item_id)
+        if item.owner_id != g.user.id or item.is_demo:
+            abort(403)
+        if request.method == 'POST':
+            item = lock_item(item_id)
+        if item.resolved or accepted_claim(item.id, lock=request.method == 'POST'):
+            flash('物品已找回或正在交接，不能修改。请先取消尚未完成的交接。', 'info')
+            return redirect(url_for('detail', item_id=item.id))
+        error, new_image = None, None
+        values = {name: getattr(item, name) for name in ('kind', 'category', 'title', 'location', 'location_detail', 'description', 'contact')}
+        values['happened_on'] = item.happened_on.isoformat()
+        if request.method == 'POST':
+            values = request.form
+            try:
+                fields = item_fields()
+                new_image = save_image(request.files.get('image'))
+                old_image = item.image_name
+                if new_image:
+                    item.image_name = new_image
+                elif request.form.get('remove_image') == 'yes':
+                    item.image_name = None
+                for name, value in fields.items():
+                    setattr(item, name, value)
+                item.review, item.review_note = 'pending', ''
+                close_applications(item.id)
+                db.session.commit()
+                if old_image and old_image != item.image_name:
+                    remove_image(old_image)
+                flash('修改已保存，重新审核通过后公开。原有待核对申请已结束，对方可重新提交。', 'success')
+                return redirect(url_for('detail', item_id=item.id))
+            except ValueError as exc:
+                db.session.rollback()
+                remove_image(new_image)
+                error = str(exc)
+            except SQLAlchemyError:
+                db.session.rollback()
+                remove_image(new_image)
+                app.logger.exception('保存修改失败')
+                return render_template('发布.html', item=item, values=values, error='修改未保存，原有信息仍保留，请稍后重试。'), 503
+        return render_template('发布.html', item=item, values=values, error=error), 400 if error else 200
 
     @app.get('/items/<int:item_id>')
     def detail(item_id):
@@ -376,9 +519,12 @@ def create_app(test_config=None):
         if g.user:
             mine = db.session.scalar(select(Claim).where(Claim.item_id == item.id, Claim.claimant_id == g.user.id))
             if g.user.id == item.owner_id or g.user.is_admin:
-                incoming = db.session.scalars(select(Claim).where(Claim.item_id == item.id).order_by(Claim.created_at.desc())).all()
-        can_contact = g.user and (g.user.id == item.owner_id or g.user.is_admin or (mine and mine.status == 'accepted'))
-        return render_template('详情.html', item=item, mine=mine, incoming=incoming, can_contact=can_contact)
+                incoming = db.session.scalars(select(Claim).options(joinedload(Claim.claimant)).where(Claim.item_id == item.id).order_by(Claim.created_at.desc())).all()
+        handover = accepted_claim(item.id) if not item.resolved else None
+        can_contact = g.user and (g.user.id == item.owner_id or g.user.is_admin or
+                                 (mine and mine.status in ('accepted', 'completed') and item.review == 'approved'))
+        return render_template('详情.html', item=item, mine=mine, incoming=incoming,
+                               can_contact=can_contact, handover=handover)
 
     @app.get('/items/<int:item_id>/image')
     def item_image(item_id):
@@ -393,20 +539,34 @@ def create_app(test_config=None):
     @app.post('/items/<int:item_id>/claim')
     @signed_in
     def claim(item_id):
-        item = db.get_or_404(Item, item_id)
-        if item.is_demo or item.review != 'approved' or item.resolved or item.owner_id == g.user.id:
+        rate_limit('claim-submit', 10, 24 * 60, identity=str(g.user.id))
+        item = lock_item(item_id)
+        if item.review != 'approved' or item.resolved or item.owner_id == g.user.id:
             abort(403)
+        if accepted_claim(item.id, lock=True):
+            flash('这件物品正在交接，暂时不接收新申请。', 'info')
+            return redirect(url_for('detail', item_id=item.id))
         try:
             recent = db.session.scalar(select(db.func.count()).select_from(Claim).where(Claim.claimant_id == g.user.id, Claim.created_at > now() - timedelta(days=1)))
             if recent >= 10:
                 raise ValueError('今天提交的申请较多，请稍后再试。')
-            db.session.add(Claim(item_id=item.id, claimant_id=g.user.id, proof=field('proof', 10, 1000), contact=field('contact', 3, 120)))
+            previous = db.session.scalar(select(Claim).where(Claim.item_id == item.id, Claim.claimant_id == g.user.id).with_for_update())
+            if previous and previous.status not in ('cancelled', 'closed'):
+                flash('你已经提交过申请，请在“我的记录”查看进度。', 'info')
+                return redirect(url_for('detail', item_id=item.id))
+            proof, contact = field('proof', 10, 1000), field('contact', 3, 120)
+            if previous:
+                previous.proof, previous.contact = proof, contact
+                previous.status, previous.created_at = 'pending', now()
+            else:
+                db.session.add(Claim(item_id=item.id, claimant_id=g.user.id, proof=proof, contact=contact))
             db.session.commit()
             flash('已发送给发布者，核对通过后可查看双方联系方式。', 'success')
         except IntegrityError:
             db.session.rollback()
             flash('你已经为这件物品提交过申请，请在“我的记录”查看进度。', 'error')
         except ValueError as exc:
+            db.session.rollback()
             flash(str(exc), 'error')
         return redirect(url_for('detail', item_id=item_id))
 
@@ -414,7 +574,8 @@ def create_app(test_config=None):
     @signed_in
     def decide_claim(claim_id):
         application = db.get_or_404(Claim, claim_id)
-        item = application.item
+        item = lock_item(application.item_id)
+        db.session.refresh(application, with_for_update=True)
         if item.owner_id != g.user.id:
             abort(403)
         action = request.form.get('action')
@@ -424,23 +585,52 @@ def create_app(test_config=None):
             flash('这条记录的状态已变化，请刷新后查看。', 'error')
             return redirect(url_for('detail', item_id=item.id))
         if action == 'accept':
-            # 条件更新避免两个并发确认同时选中不同认领者。
-            changed = db.session.execute(update(Item).where(Item.id == item.id, Item.resolved.is_(False), Item.review == 'approved').values(resolved=True))
-            if changed.rowcount != 1:
-                db.session.rollback()
+            if accepted_claim(item.id, lock=True):
                 abort(409)
-            db.session.execute(update(Claim).where(Claim.item_id == item.id, Claim.status == 'pending').values(status='rejected'))
+            if application.claimant.blocked:
+                flash('该申请人的账号已被限制，请核对其他申请。', 'error')
+                return redirect(url_for('detail', item_id=item.id))
             application.status = 'accepted'
         else:
             application.status = 'rejected'
         db.session.commit()
-        flash('已确认找回，双方现在可查看联系方式。' if action == 'accept' else '已标记为未通过。', 'success')
+        flash('核对通过，双方现在可查看联系方式。实际交接后再确认找回。' if action == 'accept' else '已标记为未通过。', 'success')
+        return redirect(url_for('detail', item_id=item.id))
+
+    @app.post('/claims/<int:claim_id>/cancel')
+    @signed_in
+    def cancel_claim(claim_id):
+        application = db.get_or_404(Claim, claim_id)
+        item = lock_item(application.item_id)
+        db.session.refresh(application, with_for_update=True)
+        if g.user.id not in (application.claimant_id, item.owner_id):
+            abort(403)
+        if application.status not in ('pending', 'accepted') or item.resolved:
+            abort(409)
+        application.status = 'cancelled'
+        db.session.commit()
+        flash('申请已取消，双方不再通过这次申请查看联系方式。', 'success')
+        return redirect(url_for('detail', item_id=item.id) if visible(item) else url_for('dashboard'))
+
+    @app.post('/claims/<int:claim_id>/complete')
+    @signed_in
+    def complete_claim(claim_id):
+        application = db.get_or_404(Claim, claim_id)
+        item = lock_item(application.item_id)
+        db.session.refresh(application, with_for_update=True)
+        if g.user.id not in (application.claimant_id, item.owner_id):
+            abort(403)
+        if item.review != 'approved' or item.resolved or application.status != 'accepted':
+            abort(409)
+        complete_item(item)
+        db.session.commit()
+        flash('已确认交接完成，物品现在计入“已找回”。', 'success')
         return redirect(url_for('detail', item_id=item.id))
 
     @app.post('/items/<int:item_id>/close')
     @signed_in
     def close_item(item_id):
-        item = db.get_or_404(Item, item_id)
+        item = lock_item(item_id)
         if item.owner_id != g.user.id:
             abort(403)
         action = request.form.get('action')
@@ -449,10 +639,10 @@ def create_app(test_config=None):
         if action == 'resolved':
             if item.review != 'approved' or item.resolved:
                 abort(409)
-            item.resolved = True
+            complete_item(item)
         else:
             item.review = 'withdrawn'
-        db.session.execute(update(Claim).where(Claim.item_id == item.id, Claim.status == 'pending').values(status='rejected'))
+            close_applications(item.id)
         db.session.commit()
         flash('物品状态已更新。', 'success')
         return redirect(url_for('dashboard'))
@@ -461,9 +651,11 @@ def create_app(test_config=None):
     @signed_in
     def dashboard():
         items = db.paginate(select(Item).where(Item.owner_id == g.user.id, Item.is_demo.is_(False)).order_by(Item.created_at.desc()), per_page=12, error_out=False)
-        claims = db.session.scalars(select(Claim).join(Item).where(Claim.claimant_id == g.user.id, Item.is_demo.is_(False)).order_by(Claim.created_at.desc()).limit(50)).all()
-        incoming = db.session.scalars(select(Claim).join(Item).where(Item.owner_id == g.user.id, Claim.status == 'pending', Item.is_demo.is_(False)).order_by(Claim.created_at.desc()).limit(50)).all()
-        return render_template('我的记录.html', page=items, claims=claims, incoming=incoming)
+        claim_page = db.paginate(select(Claim).join(Item).options(joinedload(Claim.item)).where(Claim.claimant_id == g.user.id, Item.is_demo.is_(False)).order_by(Claim.created_at.desc(), Claim.id.desc()), page=request.args.get('claims_page', 1, type=int), per_page=12, error_out=False)
+        incoming_page = db.paginate(select(Claim).join(Item).options(joinedload(Claim.item), joinedload(Claim.claimant)).where(Item.owner_id == g.user.id, Claim.status.in_(('pending', 'accepted')), Item.review == 'approved', Item.resolved.is_(False), Item.is_demo.is_(False)).order_by(Claim.created_at.desc(), Claim.id.desc()), page=request.args.get('incoming_page', 1, type=int), per_page=12, error_out=False)
+        handover_ids = set(db.session.scalars(select(Claim.item_id).where(Claim.item_id.in_([i.id for i in items.items]), Claim.status == 'accepted')))
+        return render_template('我的记录.html', page=items, claim_page=claim_page,
+                               incoming_page=incoming_page, handover_ids=handover_ids)
 
     @app.get('/admin')
     @admin_only
@@ -471,14 +663,14 @@ def create_app(test_config=None):
         state = request.args.get('state', 'pending')
         if state not in REVIEW_NAMES:
             state = 'pending'
-        page = db.paginate(select(Item).where(Item.review == state, Item.is_demo.is_(False)).order_by(Item.created_at.desc()), per_page=12, error_out=False)
+        page = db.paginate(select(Item).options(joinedload(Item.owner)).where(Item.review == state, Item.is_demo.is_(False)).order_by(Item.created_at.desc()), per_page=12, error_out=False)
         pending_count = db.session.scalar(select(db.func.count()).select_from(Item).where(Item.review == 'pending', Item.is_demo.is_(False)))
         return render_template('管理后台.html', page=page, state=state, pending_count=pending_count)
 
     @app.post('/admin/items/<int:item_id>')
     @admin_only
     def review_item(item_id):
-        item = db.get_or_404(Item, item_id)
+        item = lock_item(item_id)
         action = request.form.get('action')
         if action not in ('approve', 'reject'):
             abort(400)
@@ -491,7 +683,7 @@ def create_app(test_config=None):
         item.review = 'approved' if action == 'approve' else 'rejected'
         item.review_note = note
         if action == 'reject':
-            db.session.execute(update(Claim).where(Claim.item_id == item.id, Claim.status == 'pending').values(status='rejected'))
+            close_applications(item.id)
         db.session.commit()
         flash('审核结果已保存。', 'success')
         return redirect(url_for('admin'))

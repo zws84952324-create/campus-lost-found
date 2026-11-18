@@ -16,12 +16,10 @@
       </p>
       <div class="hero-bottom"><a class="button button-md" href="{{ url_for('publish') }}">发布一条信息 <span aria-hidden="true">↗</span></a><span class="caption-2">先核对，再认领</span></div>
     </div>
-    <div class="hero-art">
-      <img src="{{ url_for('static', filename='校园物件.svg') }}"
-           alt="钥匙、校园卡和手提包组成的校园失物招领插画"
-           width="560"
-           height="400"><span class="art-caption caption-1">每一份善意，都有回响。</span>
-    </div>
+    <figure class="campus-photo">
+      <img src="{{ url_for('static', filename='西校区正门.webp') }}" alt="保定职业技术学院西校区正门，右侧门柱上刻有学校名称" width="1190" height="543" fetchpriority="high">
+      <figcaption class="caption-2"><span>保定职业技术学院 · 西校区</span><span>熟悉的校园，彼此的照应。</span></figcaption>
+    </figure>
   </section>
   <section class="stats-strip" aria-label="站点信息统计">
     <div><span class="stat-value heading-5">{{ counts.get('lost', 0) }}</span><span class="caption-2">正在寻找主人线索</span></div>
@@ -56,7 +54,7 @@
       <div class="filter-row">
         <label>
           <span class="caption-2">信息类型</span><select name="kind" aria-label="信息类型">
-            <option value="">全部类型</option value="lost" {{ 'selected' if kind == 'lost' }}>
+            <option value="">全部类型</option><option value="lost" {{ 'selected' if kind == 'lost' }}>
               寻物启事
             </option>
             <option value="found" {{ 'selected' if kind == 'found' }}>拾物招领</option>
@@ -74,7 +72,7 @@
         <a class="reset-link caption-1" href="{{ url_for('index') }}#items">清除筛选</a>
       </div>
     </form>
-    {% if page.items %}<div class="item-grid">{% for item in page.items %}{{ card(item) }}{% endfor %}</div>{% else %}
+    {% if page.items %}<div class="item-grid">{% for item in page.items %}{{ card(item, handover_ids) }}{% endfor %}</div>{% else %}
     <div class="empty-state">
       <span class="empty-symbol" aria-hidden="true">⌕</span>
       <h3 class="heading-5">{{ '还没有找到相关信息' if q or category or location or kind or status != 'open' else '第一条校园线索，等你留下' }}</h3>
